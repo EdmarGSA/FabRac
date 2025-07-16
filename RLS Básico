@@ -1,0 +1,80 @@
+-- Criar a tabela 'users' para armazenar perfis e outras informações do usuário
+CREATE TABLE public.users (
+  id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  email text UNIQUE NOT NULL,
+  name text,
+  profiles jsonb DEFAULT '["pending"]'::jsonb NOT NULL, -- Array de strings, ex: '["admin", "producao"]'
+  created_at timestamptz DEFAULT now()
+);
+
+-- Ativar RLS para a tabela 'users'
+ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+
+-- Política para SELECT: Usuários podem ver seu próprio perfil
+CREATE POLICY "Users can view their own profile"
+ON public.users FOR SELECT
+USING (auth.uid() = id);
+
+-- Política para INSERT: Apenas admins podem criar novas entradas de usuário (opcional, ou permitir para a função de signup interna)
+-- A lógica de signUp no AuthContext tenta inserir o primeiro usuário como admin
+-- ou "pending". A política abaixo permite que o usuário crie sua própria entrada
+-- na tabela 'users' APÓS o signup no auth.users, assumindo que eles ainda não têm um perfil.
+CREATE POLICY "Allow authenticated users to create their own user entry on signup"
+ON public.users FOR INSERT
+WITH CHECK (auth.uid() = id);
+
+-- Política para UPDATE: Apenas admins podem atualizar perfis de outros usuários.
+-- Usuários podem atualizar seus próprios campos (exceto 'profiles').
+CREATE POLICY "Admins can update all user profiles"
+ON public.users FOR UPDATE
+USING (EXISTS(SELECT 1 FROM public.users WHERE id = auth.uid() AND 'admin' = ANY(profiles)))
+WITH CHECK (EXISTS(SELECT 1 FROM public.users WHERE id = auth.uid() AND 'admin' = ANY(profiles)));
+
+CREATE POLICY "Users can update their own non-profile fields"
+ON public.users FOR UPDATE
+USING (auth.uid() = id)
+WITH CHECK (auth.uid() = id AND (SELECT profiles FROM public.users WHERE id = auth.uid()) = profiles);
+-- A política acima é um pouco complexa para evitar que um usuário mude seus próprios perfis.
+-- Uma abordagem mais simples para a etapa inicial: permitir que qualquer usuário logado edite seu próprio registro,
+-- mas a interface do usuário deve limitar o que eles podem editar (ex: não permitir mudar 'profiles' via UI normal).
+-- Ou você pode remover a segunda política de UPDATE e ter apenas o admin para editar.
+-- Por enquanto, a primeira política para admin é mais importante para o controle de acesso.
+
+-- Política para DELETE: Apenas admins podem deletar usuários
+CREATE POLICY "Admins can delete any user"
+ON public.users FOR DELETE
+USING (EXISTS(SELECT 1 FROM public.users WHERE id = auth.uid() AND 'admin' = ANY(profiles)));
+
+-- Criação da função para verificar se o usuário é admin
+CREATE OR REPLACE FUNCTION is_admin(user_id uuid)
+RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  RETURN EXISTS (SELECT 1 FROM public.users WHERE id = user_id AND 'admin' = ANY(profiles));
+END;
+$$;
+
+-- Criação da função para verificar se o usuário tem um perfil específico
+CREATE OR REPLACE FUNCTION has_profile(user_id uuid, profile_name text)
+RETURNS BOOLEAN LANGUAGE plpgsql SECURITY DEFINER AS $$
+BEGIN
+  RETURN EXISTS (SELECT 1 FROM public.users WHERE id = user_id AND profile_name = ANY(profiles));
+END;
+$$;
+
+-- Exemplo de política de RLS para uma futura tabela `production_orders`
+-- APENAS execute isso quando for criar a tabela `production_orders`
+-- CREATE POLICY "Production and admin can insert production orders"
+-- ON public.production_orders FOR INSERT
+-- WITH CHECK (has_profile(auth.uid(), 'producao') OR is_admin(auth.uid()));
+
+-- CREATE POLICY "Production and admin can view production orders"
+-- ON public.production_orders FOR SELECT
+-- USING (has_profile(auth.uid(), 'producao') OR is_admin(auth.uid()));
+
+-- CREATE POLICY "Production and admin can update production orders"
+-- ON public.production_orders FOR UPDATE
+-- USING (has_profile(auth.uid(), 'producao') OR is_admin(auth.uid()));
+
+-- CREATE POLICY "Admin can delete production orders"
+-- ON public.production_orders FOR DELETE
+-- USING (is_admin(auth.uid()));
