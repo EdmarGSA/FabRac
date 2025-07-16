@@ -1,0 +1,11 @@
+// src/pages/ResetPassword.jsx
+import React from 'react';
+import AuthForm from '../components/auth/AuthForm';
+
+export default function ResetPassword() {
+  return (
+    <div className="auth-page">
+      <AuthForm type="reset-password" />
+    </div>
+  );
+}
