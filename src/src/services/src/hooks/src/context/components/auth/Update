@@ -1,0 +1,95 @@
+// src/pages/UpdatePassword.jsx
+import React, { useState, useEffect } from 'react';
+import { supabase } from '../supabaseClient';
+import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+
+export default function UpdatePassword() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  // Verifica se o usuário chegou aqui através do link de reset de senha
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) {
+        setError(t('auth.no_session_for_password_reset'));
+        // Opcional: Redirecionar se não houver sessão de reset
+        // navigate('/');
+      }
+    });
+  }, [navigate, t]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setMessage('');
+    setError('');
+
+    if (password !== confirmPassword) {
+      setError(t('auth.passwords_do_not_match'));
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase.auth.updateUser({
+        password: password,
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setMessage(t('auth.password_updated_success'));
+      setTimeout(() => {
+        navigate('/dashboard'); // Redireciona após a atualização bem-sucedida
+      }, 2000);
+    } catch (err) {
+      console.error('Erro ao atualizar senha:', err.message);
+      setError(t('auth.error_prefix') + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="auth-page">
+      <h2>{t('auth.update_password')}</h2>
+      <form onSubmit={handleSubmit}>
+        <div className="form-group">
+          <label htmlFor="password">{t('auth.new_password')}</label>
+          <input
+            type="password"
+            id="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            aria-label={t('auth.new_password')}
+          />
+        </div>
+        <div className="form-group">
+          <label htmlFor="confirmPassword">{t('auth.confirm_new_password')}</label>
+          <input
+            type="password"
+            id="confirmPassword"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            required
+            aria-label={t('auth.confirm_new_password')}
+          />
+        </div>
+        <button type="submit" disabled={loading} className="btn-primary">
+          {loading ? t('auth.updating_password') : t('auth.update_password_button')}
+        </button>
+      </form>
+
+      {message && <p className="success-message">{message}</p>}
+      {error && <p className="error-message">{error}</p>}
+    </div>
+  );
+}
